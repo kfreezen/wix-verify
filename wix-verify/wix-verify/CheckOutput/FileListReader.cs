@@ -9,8 +9,15 @@ namespace wix_verify.CheckOutput
 {
     public class FileListReader
     {
-        public List<WixFile> GetFiles(string wxsFile)
+        public List<WixFile> GetFiles(string wxsFile, List<string> ignores)
         {
+            string wxsDirectory = Path.GetDirectoryName(wxsFile);
+
+            if(ignores == null)
+            {
+                throw new ArgumentNullException(nameof(ignores));
+            }
+
             XmlReaderSettings readerSettings = new XmlReaderSettings()
             {
                 IgnoreComments = false
@@ -28,30 +35,26 @@ namespace wix_verify.CheckOutput
                     {
                         case XmlNodeType.Comment:
                             {
-                                string commentString = reader.ReadContentAsString();
+                                string commentString = reader.Value;
 
                                 string[] commentParts = commentString.Trim().ToLowerInvariant().Split(new char[] { ':' }, 2);
                                 if (commentParts.Length > 1 && commentParts[0].Trim() == "ignore-file")
                                 {
-                                    files.Add(new WixFile()
-                                    {
-                                        Source = commentParts[1],
-                                        Ignored = true
-                                    });
+                                    ignores.Add(Path.GetFullPath(commentParts[1], wxsDirectory));
                                 }
                             }
                             break;
-                    }
 
-                    if(reader.IsStartElement())
-                    {
-                        if (reader.Name.ToLowerInvariant() == "file")
-                        {
-                            var file = ReadFile(reader);
-                            file.WxsFilePath = wxsFile;
-
-                            if (file != null) files.Add(file);
-                        }
+                        case XmlNodeType.Element:
+                            {
+                                if (reader.Name.ToLowerInvariant() == "file")
+                                {
+                                    var file = ReadFile(reader);
+                                    file.WxsFilePath = wxsFile;
+                                    if (file != null) files.Add(file);
+                                }
+                            }
+                            break;
                     }
                 }
             }

@@ -5,6 +5,8 @@ using System.IO;
 using wix_verify.CheckOutput.Models;
 using wix_verify.CheckOutput;
 using System.Linq;
+using System.Text.RegularExpressions;
+using System.Diagnostics;
 
 namespace wix_verify.Subcommands
 {
@@ -37,6 +39,8 @@ namespace wix_verify.Subcommands
             }
 
             List<WixFile> wxsFileElements = new List<WixFile>();
+            List<string> ignores = new List<string>();
+
             var listReader = new FileListReader();
 
             foreach(var filename in wxsFiles)
@@ -45,7 +49,7 @@ namespace wix_verify.Subcommands
                 {
                     string fullWxs = Path.GetFullPath(filename);
 
-                    List<WixFile> files = listReader.GetFiles(fullWxs);
+                    List<WixFile> files = listReader.GetFiles(fullWxs, ignores);
                     if (files != null) wxsFileElements.AddRange(files);
                 }
                 catch(Exception ex)
@@ -65,24 +69,33 @@ namespace wix_verify.Subcommands
             // 2. 
 
             var applicationFiles = Directory.EnumerateFileSystemEntries(applicationOutput, "*", new EnumerationOptions() { RecurseSubdirectories = true })
-                .Select(s => new OutputFileWithTags() { Filename = Path.GetFullPath(s) });
+                .Where(s => !new FileInfo(s).Attributes.HasFlag(FileAttributes.Directory))
+                .Select(s => new OutputFileWithTags() { Filename = Path.GetFullPath(s) })
+                .ToList();
 
-            foreach(var wixFile in wxsFileElements)
+            List<Regex> regexIgnores = ignores.Select(s => new Regex(Regex.Escape(s.ToLowerInvariant()).Replace(@"\*", ".*").Replace(@"\?", "."))).ToList();
+
+            foreach (var wixFile in wxsFileElements)
             {
                 string wxsDirectory = Path.GetDirectoryName(wixFile.WxsFilePath);
 
                 // We want to make sure Source filename and Name match.
                 string relativeSource = wixFile.Source;
+                if(relativeSource == null || wxsDirectory == null)
+                {
+                    System.Diagnostics.Debugger.Break();
+                }
+
                 string absoluteSource = Path.GetFullPath(relativeSource, wxsDirectory);
 
-                if(!wixFile.Ignored && Path.GetFileName(absoluteSource).ToLowerInvariant() != wixFile.Name.ToLowerInvariant())
+                if(Path.GetFileName(absoluteSource).ToLowerInvariant() != wixFile.Name.ToLowerInvariant())
                 {
                     Console.WriteLine("ERROR: Source Filename != Name. Source = '{0}', Name = '{1}'", relativeSource, wixFile.Name);
                     returnVal = 1;
                 }
 
                 // We want to make sure that Source exists in application output.
-                if(!wixFile.Ignored && !absoluteSource.IsSubPathOf(applicationOutput))
+                if(!absoluteSource.IsSubPathOf(applicationOutput))
                 {
                     Console.WriteLine("WARN: File source '{0}' outside of specified application output folder. Was this intended?", wixFile.Source);
                 }
@@ -90,10 +103,14 @@ namespace wix_verify.Subcommands
                 {
                     OutputFileWithTags outputFile = findOutputFile(applicationFiles, absoluteSource);
 
-                    if (!wixFile.Ignored && outputFile == null)
+                    if (outputFile == null)
                     {
-                        Console.WriteLine("ERROR: File specified in WXS does not have corresponding file in application output. Source='{0}'", wixFile.Source);
+                        Console.WriteLine("ERROR: File specified in {0} does not have corresponding file in application output. Source='{1}'", Path.GetFileName(wixFile.WxsFilePath), wixFile.Source);
                         returnVal = 1;
+                    }
+                    else if(wixFile == null)
+                    {
+                        Debugger.Break();
                     }
                     else
                     {
@@ -104,7 +121,8 @@ namespace wix_verify.Subcommands
 
             foreach(var outputFile in applicationFiles)
             {
-                if(outputFile.LocatedWixFile == null)
+                bool ignored = matchIgnore(regexIgnores, outputFile.Filename);
+                if(outputFile.LocatedWixFile == null && !ignored)
                 {
                     Console.WriteLine("ERROR: File '{0}' in application output does not have corresponding WiX file entry. If this is intentional, please add an ignore-file comment.", outputFile.Filename);
                     returnVal = 1;
@@ -112,6 +130,17 @@ namespace wix_verify.Subcommands
             }
 
             return returnVal;
+        }
+
+        private static bool matchFiles(string name, string absoluteSource)
+        {
+            return name.ToLowerInvariant() == absoluteSource;
+        }
+
+        private static bool matchIgnore(List<Regex> ignores, string absoluteSource)
+        {
+            absoluteSource = absoluteSource.ToLowerInvariant();
+            return ignores.Any(i => i.IsMatch(absoluteSource));
         }
 
         private static OutputFileWithTags findOutputFile(IEnumerable<OutputFileWithTags> files, string absoluteSource)

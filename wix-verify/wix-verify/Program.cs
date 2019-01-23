@@ -24,12 +24,11 @@ namespace wix_verify
                         break;
 
                     case "check-output":
-                        Environment.Exit(Subcommands.CheckOutput.Run(sub_args));
+                        var ret = Subcommands.CheckOutput.Run(sub_args);
+                        Environment.Exit(ret);
                         break;
                 }
             }
-
-            Console.WriteLine("Hello World!");
         }
 
         static void PrintUsage()
