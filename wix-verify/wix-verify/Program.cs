@@ -24,7 +24,8 @@ namespace wix_verify
                         break;
 
                     case "check-output":
-                        Environment.Exit(CheckOutput.Run(sub_args));
+                        Environment.Exit(Subcommands.CheckOutput.Run(sub_args));
+                        break;
                 }
             }
 
